@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -136,10 +136,12 @@ status_counts = (
     .rename(columns={'index': 'Status', 'Status_norm': 'Count'})
 )
 status_counts.columns = ['Status', 'Count']
-# Filter out "To Do" status
-status_counts = status_counts[status_counts['Status'] != 'To Do']
-status_counts['Percentage'] = (status_counts['Count'].sum() / total_tickets * 100).round(2)
-# Recalculate percentages based on filtered total
+
+# Define the statuses we want to focus on consistently throughout the report
+focus_statuses = ["To Do", "In Progress", "QA"]
+
+# Filter to include only focus statuses instead of excluding "To Do"
+status_counts = status_counts[status_counts['Status'].isin(focus_statuses)]
 status_counts['Percentage'] = (status_counts['Count'] / status_counts['Count'].sum() * 100).round(2)
 
 # 1.3.2 Tickets con más de 10 días abiertos
@@ -147,11 +149,12 @@ df['createdAt'] = pd.to_datetime(df['createdAt'])
 df['createdAt'] = df['createdAt'].dt.tz_localize(None)
 now = datetime.now()
 df['DaysOpen'] = (now - df['createdAt']).dt.days
-# Filter for tickets with more than 10 days open AND status of "In Progress"
-df_old = df[(df['DaysOpen'] > 10) & (df['Status_norm'] == 'In Progress')].copy()
+
+# Filter for tickets with more than 10 days open AND within our focus statuses
+df_old = df[(df['DaysOpen'] > 10) & (df['Status_norm'].isin(focus_statuses))].copy()
 df_old = df_old.sort_values(by='DaysOpen', ascending=False)
 
-# 1.3.3 Preparar gráfico “Distribución by Category”
+# 1.3.3 Preparar gráfico "Distribución by Category"
 category_counts = (
     df['Category_norm']
     .value_counts()
@@ -190,14 +193,16 @@ df_jira['Created'] = pd.to_datetime(df_jira['Created'], dayfirst=False, utc=True
 df_jira['Created'] = df_jira['Created'].dt.tz_localize(None)
 df_jira['DaysOpen'] = (now - df_jira['Created']).dt.days
 
+# Define the statuses we want to focus on
+focus_statuses = ["To Do", "In Progress", "QA"]
+
 # 2.1 Filtrar "USA Scaled Tickets" (Labels == 'COLSupport')
 df_usa = df_jira[df_jira['Labels'].astype(str).str.contains('COLSupport', na=False)].copy()
 
-# Filtrar solo para los estados "To Do", "In Progress" y "QA"
-relevant_statuses = ["To Do", "In Progress", "QA"]
-df_usa_filtered = df_usa[df_usa['Status'].isin(relevant_statuses)].copy()
+# Filter only for the specified statuses
+df_usa_filtered = df_usa[df_usa['Status'].isin(focus_statuses)].copy()
 
-# Actualizar el total de tickets para mostrar solo estos 3 estados
+# Update the total tickets count to show only these statuses
 usa_total = len(df_usa_filtered)
 
 # Distribución USA por Status (para el gráfico), solo incluyendo los estados relevantes
@@ -211,7 +216,7 @@ usa_status_counts.columns = ['Status', 'Count']
 
 # Crear gráfico horizontal de barras para USA Scaled Tickets - Status
 plt.figure(figsize=(8, 4))
-# Usar sort_values para ordenar los estados (To Do, In Progress, QA, etc.)
+# Usar sort_values para ordenar los estados (To Do, In Progress, QA)
 usa_status_sorted = usa_status_counts.sort_values(by='Count', ascending=True)
 y_pos = range(len(usa_status_sorted))
 
@@ -234,8 +239,7 @@ usa_status_buf.seek(0)
 plt.close()
 
 # Distribución USA por Priority, filtrando por los estados específicos
-relevant_statuses = ["In Progress", "QA", "Release", "To Do"]
-df_usa_status_filtered = df_usa[df_usa['Status'].isin(relevant_statuses)].copy()
+df_usa_status_filtered = df_usa_filtered.copy()  # Already filtered for focus_statuses
 
 usa_priority_counts = (
     df_usa_status_filtered['Priority']  # Use the filtered dataframe 
@@ -269,7 +273,7 @@ plt.savefig(usa_priority_buf, format='png', dpi=300, bbox_inches='tight')
 usa_priority_buf.seek(0)
 plt.close()
 
-usa_avg_days = df_usa.groupby('Priority')['DaysOpen'].mean().round(2)
+usa_avg_days = df_usa_filtered.groupby('Priority')['DaysOpen'].mean().round(2)
 if not usa_avg_days.empty:
     highest_priority_usa = usa_avg_days.idxmax()
     highest_avg_usa = int(usa_avg_days.max())
@@ -278,21 +282,20 @@ else:
     highest_avg_usa = 0
 
 if highest_priority_usa:
-    df_usa_top = df_usa[df_usa['Priority'] == highest_priority_usa].copy()
+    df_usa_top = df_usa_filtered[df_usa_filtered['Priority'] == highest_priority_usa].copy()
 else:
-    df_usa_top = pd.DataFrame(columns=df_usa.columns)
+    df_usa_top = pd.DataFrame(columns=df_usa_filtered.columns)
 
-# 2.2 “Global Scaled Tickets” (todos los tickets de JIRA)
+# 2.2 "Global Scaled Tickets" (todos los tickets de JIRA)
 df_global = df_jira.copy()
 
-# Filtrar por los estados especificados para las tablas Global
-relevant_global_statuses = ["In Progress", "QA", "Release", "To Do"]
-df_global_filtered = df_global[df_global['Status'].isin(relevant_global_statuses)].copy()
+# Filter global tickets by the specified statuses
+df_global_filtered = df_global[df_global['Status'].isin(focus_statuses)].copy()
 
-# Actualizar el total para mostrar solo los estados relevantes
+# Update the total for focused statuses only
 global_total = len(df_global_filtered)
 
-# Distribución Global por Status (solo estados relevantes)
+# Distribución Global por Status (only focused statuses)
 global_status_counts = (
     df_global_filtered['Status']
     .value_counts()
@@ -301,7 +304,7 @@ global_status_counts = (
 )
 global_status_counts.columns = ['Status', 'Count']
 
-# Distribución Global por Priority (solo para tickets con estados relevantes)
+# Distribución Global por Priority (only for tickets with focused statuses)
 global_priority_counts = (
     df_global_filtered['Priority']
     .value_counts()
@@ -310,7 +313,7 @@ global_priority_counts = (
 )
 global_priority_counts.columns = ['Priority', 'Count']
 
-# "Global Tickets with Highest Priority" (filtrado para los estados relevantes)
+# "Global Tickets with Highest Priority" (filtered for focus statuses)
 df_global_top = df_global_filtered[df_global_filtered['Priority'] == 'Highest'].copy()
 
 # ----------------------------------------
@@ -367,7 +370,137 @@ doc.core_properties.author = "L10 Team"
 title = doc.add_heading('Support & Tickets Report', level=1)
 title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+# ----------------------------------------
+# NEW SECTION: Recent Support Tickets (Past Two Weeks)
+# ----------------------------------------
+# Filter tickets from the past two weeks
+two_weeks_ago = now - timedelta(days=14)
+df_recent = df[df['createdAt'] >= two_weeks_ago].copy()
+recent_tickets_count = len(df_recent)
+
+# ----------------------------------------
+# Add calls data processing
+# ----------------------------------------
+# Load and process calls data
+calls_path = r'D:\l10 report\Data\Calls.csv'
+if os.path.isfile(calls_path):
+    df_calls = pd.read_csv(calls_path)
+    # Convert Unix timestamp to datetime
+    df_calls['DateTime'] = pd.to_datetime(df_calls['Time'], unit='s')
+    
+    # Filter calls from the past two weeks
+    recent_calls = df_calls[df_calls['DateTime'] >= two_weeks_ago]
+    recent_calls_count = len(recent_calls)
+else:
+    recent_calls_count = 0
+
+# Add section header
+doc.add_heading('Recent Support Activity (Past Two Weeks)', level=2)
+
+# Create a table for total counts
+total_counts_table = doc.add_table(rows=3, cols=2)
+total_counts_table.style = 'Table Grid'
+
+# Add headers
+header_cells = total_counts_table.rows[0].cells
+header_cells[0].text = 'Activity Type'
+header_cells[1].text = 'Total Count'
+
+# Format header
+for cell in header_cells:
+    # Set light blue background (#B8CCE4) for header
+    shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="B8CCE4"/>')
+    cell._element.get_or_add_tcPr().append(shading_elm)
+    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cell.paragraphs[0].runs[0].font.bold = True
+
+# Add call count row
+call_cells = total_counts_table.rows[1].cells
+call_cells[0].text = 'Phone Calls'
+call_cells[1].text = str(recent_calls_count)
+call_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+# Add ticket count row
+ticket_cells = total_counts_table.rows[2].cells
+ticket_cells[0].text = 'Support Tickets'
+ticket_cells[1].text = str(recent_tickets_count)
+ticket_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+# Apply borders to all cells in the table
+for row in total_counts_table.rows:
+    for cell in row.cells:
+        set_cell_border(
+            cell,
+            top={"sz": 4, "val": "single", "color": "#000000"},
+            bottom={"sz": 4, "val": "single", "color": "#000000"},
+            left={"sz": 4, "val": "single", "color": "#000000"},
+            right={"sz": 4, "val": "single", "color": "#000000"},
+        )
+
+# Add some space after the table
+doc.add_paragraph()
+
+# Create pie chart of status distribution for recent tickets
+if recent_tickets_count > 0:
+    # Changed from Status_norm to Category_norm to show categories instead of statuses
+    recent_category_counts = (
+        df_recent['Category_norm']
+        .value_counts()
+        .reset_index()
+    )
+    # Explicitly rename the columns to ensure correct names
+    recent_category_counts.columns = ['Category', 'Count']
+    
+    # Calculate percentages for each category
+    recent_category_counts['Percentage'] = (recent_category_counts['Count'] / recent_category_counts['Count'].sum() * 100).round(2)
+    
+    # Group categories with less than 3% into "Other"
+    threshold = 3.0
+    main_categories = recent_category_counts[recent_category_counts['Percentage'] >= threshold]
+    small_categories = recent_category_counts[recent_category_counts['Percentage'] < threshold]
+    
+    if not small_categories.empty:
+        # Create "Other" row with sum of all small categories
+        other_row = pd.DataFrame({
+            'Category': ['Other'],
+            'Count': [small_categories['Count'].sum()],
+            'Percentage': [small_categories['Percentage'].sum()]
+        })
+        
+        # Combine main categories with "Other" category
+        plot_data = pd.concat([main_categories, other_row], ignore_index=True)
+    else:
+        plot_data = main_categories
+    
+    # Create pie chart
+    plt.figure(figsize=(7, 5))
+    colors = ['#A9D08E', '#FFD966', '#BDD7EE', '#D9D9D9', '#F4B084', '#C6E0B4', '#FFE699', '#9BC2E6', '#C9C9C9', '#F8CBAD']  # Using more colors for categories
+    
+    # If there are more categories than colors, it will cycle through the colors
+    plt.pie(
+        plot_data['Count'], 
+        labels=plot_data['Category'], 
+        autopct='%1.1f%%',
+        startangle=90,
+        colors=colors[:len(plot_data)]
+    )
+    plt.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle
+    plt.title('Recent Tickets by Category')  # Changed title to reflect categories
+    
+    # Save pie chart to buffer
+    recent_category_buf = io.BytesIO()
+    plt.savefig(recent_category_buf, format='png', dpi=300, bbox_inches='tight')
+    recent_category_buf.seek(0)
+    plt.close()
+    
+    # Add pie chart to document
+    chart_para = doc.add_paragraph()
+    chart_run = chart_para.add_run()
+    chart_run.add_picture(recent_category_buf, width=Inches(5))  # Using the category buffer
+    
+    
 # Add total tickets
+doc.add_heading('Total support tickets', level=3)
 doc.add_paragraph(f'Total Tickets: {total_tickets}')
 
 # Create the STATUS table
@@ -429,10 +562,7 @@ category_para = doc.add_paragraph()
 category_run = category_para.add_run()
 category_run.add_picture(buf, width=Inches(6))
 
-# Add spacing after graph
-doc.add_paragraph()  # Empty paragraph for spacing
-
-# Add Tickets with more than 10 days open
+# Add Tickets with more de 10 días abiertos
 doc.add_heading('Tickets with más de 10 días abiertos', level=2)
 old_tickets_table = doc.add_table(rows=1, cols=5)
 old_tickets_table.style = 'Table Grid'
@@ -473,9 +603,6 @@ status_para = doc.add_paragraph()
 status_run = status_para.add_run()
 status_run.add_picture(usa_status_buf, width=Inches(6))
 
-# Add spacing after graph
-doc.add_paragraph()  # Empty paragraph for spacing
-
 # Add Priority section
 doc.add_paragraph('Priority')
 # Add priority graph
@@ -483,8 +610,6 @@ priority_para = doc.add_paragraph()
 priority_run = priority_para.add_run()
 priority_run.add_picture(usa_priority_buf, width=Inches(6))
 
-# Add spacing after graph
-doc.add_paragraph()  # Empty paragraph for spacing
 
 # Add Highest average days
 doc.add_paragraph(f'Highest average days opened = {highest_avg_usa} days')
@@ -504,7 +629,13 @@ hdr[6].text = 'Sprint'
 style_table_like_image(usa_tickets_table)
 set_column_width(usa_tickets_table, 2, 3.0)
 
-for _, row in df_usa_top.head(10).iterrows():
+# Filter for Highest and High priority tickets in focus statuses only
+df_usa_highest = df_usa_filtered[df_usa_filtered['Priority'] == 'Highest'].copy().sort_values(by='Created', ascending=False)
+df_usa_high = df_usa_filtered[df_usa_filtered['Priority'] == 'High'].copy().sort_values(by='Created', ascending=False)
+
+# First add all Highest priority tickets
+added_rows = 0
+for _, row in df_usa_highest.head(10).iterrows():
     r = usa_tickets_table.add_row().cells
     r[0].text = str(row['Issue key'])
     r[1].text = str(row.get('Issue id', ''))
@@ -519,6 +650,25 @@ for _, row in df_usa_top.head(10).iterrows():
         r[5].text = str(created_date)
         
     r[6].text = str(row.get('Sprint', ''))
+    added_rows += 1
+
+# If we have fewer than 5 highest priority tickets, add some high priority ones too
+if added_rows < 5:
+    for _, row in df_usa_high.head(10 - added_rows).iterrows():
+        r = usa_tickets_table.add_row().cells
+        r[0].text = str(row['Issue key'])
+        r[1].text = str(row.get('Issue id', ''))
+        r[2].text = str(row.get('Summary', ''))
+        r[3].text = str(row.get('Priority', ''))
+        r[4].text = str(row.get('Status', ''))
+        
+        created_date = row.get('Created')
+        if created_date is not None and hasattr(created_date, 'strftime'):
+            r[5].text = created_date.strftime('%m/%d/%Y')
+        else:
+            r[5].text = str(created_date)
+            
+        r[6].text = str(row.get('Sprint', ''))
 
 # ----------------------------------------
 # 5. --- Global Scaled Tickets Section ---

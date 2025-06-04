@@ -34,6 +34,42 @@ def insert_table_after(doc, paragraph, rows, cols):
     body.insert(idx + 1, tbl._tbl)
     return tbl
 
+def style_table_like_image(table):
+    """
+    Aplica el estilo de la imagen de muestra a la tabla:
+    - Cabecera azul claro
+    - Texto en negrita y centrado en la cabecera
+    - Bordes en todas las celdas
+    """
+    # Import required modules
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    
+    # Apply light blue header style (first row)
+    header_row = table.rows[0]
+    for cell in header_row.cells:
+        # Set light blue background (#B8CCE4) for header
+        shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="B8CCE4"/>')
+        cell._element.get_or_add_tcPr().append(shading_elm)
+        # Make header text bold and centered
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in paragraph.runs:
+                run.font.bold = True
+                
+    # Apply borders to all cells in the table
+    border_attrs = {"sz": 4, "val": "single", "color": "#000000"}
+    for row in table.rows:
+        for cell in row.cells:
+            set_cell_border(
+                cell,
+                top=border_attrs,
+                bottom=border_attrs,
+                left=border_attrs,
+                right=border_attrs,
+            )
+
 # ----------------------------------------
 # 1. --- Cargar datos de Excel (soporte) ---
 # ----------------------------------------
@@ -66,7 +102,11 @@ status_counts = (
     .rename(columns={'index': 'Status', 'Status_norm': 'Count'})
 )
 status_counts.columns = ['Status', 'Count']
-status_counts['Percentage'] = (status_counts['Count'] / total_tickets * 100).round(2)
+# Filter out "To Do" status
+status_counts = status_counts[status_counts['Status'] != 'To Do']
+status_counts['Percentage'] = (status_counts['Count'].sum() / total_tickets * 100).round(2)
+# Recalculate percentages based on filtered total
+status_counts['Percentage'] = (status_counts['Count'] / status_counts['Count'].sum() * 100).round(2)
 
 # 1.3.2 Tickets con más de 10 días abiertos
 df['createdAt'] = pd.to_datetime(df['createdAt'])
@@ -118,11 +158,17 @@ df_jira['DaysOpen'] = (now - df_jira['Created']).dt.days
 
 # 2.1 Filtrar "USA Scaled Tickets" (Labels == 'COLSupport')
 df_usa = df_jira[df_jira['Labels'].astype(str).str.contains('COLSupport', na=False)].copy()
-usa_total = len(df_usa)
 
-# Distribución USA por Status (para el gráfico)
+# Filtrar solo para los estados "To Do", "In Progress" y "QA"
+relevant_statuses = ["To Do", "In Progress", "QA"]
+df_usa_filtered = df_usa[df_usa['Status'].isin(relevant_statuses)].copy()
+
+# Actualizar el total de tickets para mostrar solo estos 3 estados
+usa_total = len(df_usa_filtered)
+
+# Distribución USA por Status (para el gráfico), solo incluyendo los estados relevantes
 usa_status_counts = (
-    df_usa['Status']
+    df_usa_filtered['Status']
     .value_counts()
     .reset_index()
     .rename(columns={'index': 'Status', 'Status': 'Count'})
@@ -153,14 +199,41 @@ plt.savefig(usa_status_buf, format='png', dpi=300, bbox_inches='tight')
 usa_status_buf.seek(0)
 plt.close()
 
-# Distribución USA por Priority
+# Distribución USA por Priority, filtrando por los estados específicos
+relevant_statuses = ["In Progress", "QA", "Release", "To Do"]
+df_usa_status_filtered = df_usa[df_usa['Status'].isin(relevant_statuses)].copy()
+
 usa_priority_counts = (
-    df_usa['Priority']
+    df_usa_status_filtered['Priority']  # Use the filtered dataframe 
     .value_counts()
     .reset_index()
     .rename(columns={'index': 'Priority', 'Priority': 'Count'})
 )
 usa_priority_counts.columns = ['Priority', 'Count']
+
+# Crear gráfico horizontal de barras para USA Scaled Tickets - Priority
+plt.figure(figsize=(8, 4))
+# Ordenar por orden alfabético (Low, Medium, High) o como prefieras
+usa_priority_sorted = usa_priority_counts.sort_values(by='Count', ascending=True)
+y_pos = range(len(usa_priority_sorted))
+
+plt.barh(y_pos, usa_priority_sorted['Count'], align='center', color='#116693')  # Color azul similar al anterior
+plt.yticks(y_pos, usa_priority_sorted['Priority'])
+plt.xlabel('Number of Tickets')
+plt.title('PRIORITY')
+plt.grid(True, axis='x', linestyle='--', alpha=0.7)
+
+# Añadir el conteo al final de cada barra
+for i, v in enumerate(usa_priority_sorted['Count']):
+    plt.text(v + 0.1, i, str(v), va='center')
+
+plt.tight_layout()
+
+# Guardar gráfico en memoria para insertarlo luego en Word
+usa_priority_buf = io.BytesIO()
+plt.savefig(usa_priority_buf, format='png', dpi=300, bbox_inches='tight')
+usa_priority_buf.seek(0)
+plt.close()
 
 usa_avg_days = df_usa.groupby('Priority')['DaysOpen'].mean().round(2)
 if not usa_avg_days.empty:
@@ -177,25 +250,34 @@ else:
 
 # 2.2 “Global Scaled Tickets” (todos los tickets de JIRA)
 df_global = df_jira.copy()
-global_total = len(df_global)
 
+# Filtrar por los estados especificados para las tablas Global
+relevant_global_statuses = ["In Progress", "QA", "Release", "To Do"]
+df_global_filtered = df_global[df_global['Status'].isin(relevant_global_statuses)].copy()
+
+# Actualizar el total para mostrar solo los estados relevantes
+global_total = len(df_global_filtered)
+
+# Distribución Global por Status (solo estados relevantes)
 global_status_counts = (
-    df_global['Status']
+    df_global_filtered['Status']
     .value_counts()
     .reset_index()
     .rename(columns={'index': 'Status', 'Status': 'Count'})
 )
 global_status_counts.columns = ['Status', 'Count']
 
+# Distribución Global por Priority (solo para tickets con estados relevantes)
 global_priority_counts = (
-    df_global['Priority']
+    df_global_filtered['Priority']
     .value_counts()
     .reset_index()
     .rename(columns={'index': 'Priority', 'Priority': 'Count'})
 )
 global_priority_counts.columns = ['Priority', 'Count']
 
-df_global_top = df_global[df_global['Priority'] == 'Highest'].copy()
+# "Global Tickets with Highest Priority" (filtrado para los estados relevantes)
+df_global_top = df_global_filtered[df_global_filtered['Priority'] == 'Highest'].copy()
 
 # ----------------------------------------
 # 3. --- Abrir plantilla de Word y actualizar contenido ---
@@ -213,15 +295,117 @@ for i, para in enumerate(doc.paragraphs):
         para.text = f'Total Tickets: {total_tickets}'
         break
 
-# 3.2 Rellenar TABLA 0 (índice 0): “STATUS  %  # TICKETS”
+# 3.2 Rellenar TABLA 0 (índice 0): "STATUS  %  # TICKETS" con estilo
+from docx.oxml.ns import nsdecls
+from docx.oxml import parse_xml
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt
+
 table0 = doc.tables[0]
+# Limpiar la tabla existente, dejando solo la cabecera
 for _ in range(len(table0.rows) - 1):
     table0._tbl.remove(table0.rows[1]._tr)
-for _, row in status_counts.iterrows():
-    cells = table0.add_row().cells
-    cells[0].text = str(row['Status'])
-    cells[1].text = f"{row['Percentage']}%"
-    cells[2].text = str(int(row['Count']))
+
+# Estilizar la cabecera con fondo gris oscuro y texto blanco
+header_row = table0.rows[0]
+for i, cell in enumerate(header_row.cells):
+    # Establecer fondo gris oscuro (#404040)
+    shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="404040"/>')
+    cell._element.get_or_add_tcPr().append(shading_elm)
+    
+    # Establecer texto en blanco y centrado
+    cell.text = ['STATUS', '%', '# TICKETS'][i]
+    for paragraph in cell.paragraphs:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in paragraph.runs:
+            # Establecer el color como objeto RGBColor en lugar de usar parse_xml
+            from docx.shared import RGBColor
+            run.font.color.rgb = RGBColor(255, 255, 255)  # Color blanco
+            run.font.bold = True
+            run.font.size = Pt(11)
+
+# Definir colores para cada status
+status_colors = {
+    'Done': 'A9D08E',       # Verde para Done
+    'In Progress': 'FFD966', # Amarillo para In Progress
+    'Scaled': 'BDD7EE',     # Azul claro para Scaled
+    "Won't do": 'D9D9D9',   # Gris para Won't do
+}
+
+# Insertar filas con estilos que coinciden con la imagen
+for _, row_data in status_counts.iterrows():
+    row_cells = table0.add_row().cells
+    status = row_data['Status']
+    
+    # Texto de las celdas
+    row_cells[0].text = status
+    row_cells[1].text = f"{row_data['Percentage']}%"
+    row_cells[2].text = str(int(row_data['Count']))
+    
+    # Aplicar color de fondo según el status
+    color = status_colors.get(status, 'FFFFFF')
+    for i, cell in enumerate(row_cells):
+        # Aplicar sombreado de celda
+        shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
+        cell._element.get_or_add_tcPr().append(shading_elm)
+        
+        # Centrar contenido para columnas % y # TICKETS
+        if i > 0:  # Las columnas 1 y 2 (% y # TICKETS)
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Ajustar formato de texto
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                run.font.size = Pt(11)
+
+# Asegurar bordes visibles para toda la tabla
+# Eliminar la línea que asigna el estilo 'Table Grid'
+# table0.style = 'Table Grid'  # Esta línea causa el error
+
+# Aplicar bordes manualmente:
+from docx.oxml.shared import OxmlElement
+
+def set_cell_border(cell, **kwargs):
+    """
+    Set cell border
+    Usage:
+    set_cell_border(
+        cell,
+        top={"sz": 12, "val": "single", "color": "#000000"},
+        bottom={"sz": 12, "val": "single", "color": "#000000"},
+        left={"sz": 12, "val": "single", "color": "#000000"},
+        right={"sz": 12, "val": "single", "color": "#000000"},
+    )
+    """
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    
+    for side, attrs in kwargs.items():
+        tag = f"w:{side}"
+        # Use xpath to find elements - more reliable than direct find
+        element_list = tcPr.xpath(f'./{tag}')
+        if element_list:
+            elm = element_list[0]
+        else:
+            elm = OxmlElement(tag)
+            tcPr.append(elm)
+            
+        # Fix: When setting attributes, don't include the namespace prefix in the attribute name
+        for k, v in attrs.items():
+            # Set the attribute without the w: prefix
+            elm.set(k, str(v))
+                
+# Aplicar bordes a todas las celdas
+border_attrs = {"sz": 12, "val": "single", "color": "#000000"}
+for row in table0.rows:
+    for cell in row.cells:
+        set_cell_border(
+            cell,
+            top=border_attrs,
+            bottom=border_attrs,
+            left=border_attrs,
+            right=border_attrs,
+        )
 
 # 3.3 Insertar gráfico “Distribution by Category” justo después del párrafo “Distribution by Category:”
 for i, para in enumerate(doc.paragraphs):
@@ -313,17 +497,47 @@ for para in doc.paragraphs:
         usa_top_para = para
         break
 
+# Instead of filtering by highest average days, filter for High priority tickets with specific statuses
+relevant_statuses_for_top = ["To Do", "In Progress", "QA"]
+df_usa_top = df_usa[
+    (df_usa['Priority'] == 'High') & 
+    (df_usa['Status'].isin(relevant_statuses_for_top))
+].copy().sort_values(by='Created', ascending=False)
+
 if usa_top_para is not None:
-    table_usa_top = insert_table_after(doc, usa_top_para, 1, 3)
+    # Recreate the table similar to the image provided
+    table_usa_top = insert_table_after(doc, usa_top_para, 1, 7)  # Table with 7 columns
+    
+    # Set column headers like in the image
     hdr = table_usa_top.rows[0].cells
     hdr[0].text = 'Issue key'
-    hdr[1].text = 'Summary'
-    hdr[2].text = 'Days Open'
+    hdr[1].text = 'Issue id'
+    hdr[2].text = 'Summary'
+    hdr[3].text = 'Priority'
+    hdr[4].text = 'Status'
+    hdr[5].text = 'Created'
+    hdr[6].text = 'Sprint'
+    
+    # Style the table header
+    style_table_like_image(table_usa_top)
+    
+    # Add data rows
     for _, row in df_usa_top.head(10).iterrows():
         r = table_usa_top.add_row().cells
         r[0].text = str(row['Issue key'])
-        r[1].text = str(row.get('Summary', ''))
-        r[2].text = str(int(row['DaysOpen']))
+        r[1].text = str(row.get('Issue id', ''))
+        r[2].text = str(row.get('Summary', ''))
+        r[3].text = str(row.get('Priority', ''))
+        r[4].text = str(row.get('Status', ''))
+        
+        # Format the Created date to match the image format (MM/DD/YYYY)
+        created_date = row.get('Created')
+        if created_date is not None and hasattr(created_date, 'strftime'):
+            r[5].text = created_date.strftime('%m/%d/%Y')
+        else:
+            r[5].text = str(created_date)
+            
+        r[6].text = str(row.get('Sprint', ''))
 
 # Encontrar "USA Scaled Tickets" y actualizar la línea siguiente
 for i, para in enumerate(doc.paragraphs):
@@ -341,6 +555,22 @@ for i, para in enumerate(doc.paragraphs):
             status_caption = insert_paragraph_after(img_para, "Figure: USA Scaled Tickets Status Distribution")
         break
 
+# Insertar el gráfico de Priority en la sección USA Scaled Tickets
+for i, para in enumerate(doc.paragraphs):
+    if 'USA Scaled Tickets' in para.text:
+        # Buscar el párrafo "Priority" en la sección USA
+        for j in range(i, len(doc.paragraphs)):
+            if doc.paragraphs[j].text.strip() == 'Priority':
+                # Insertar el gráfico después del párrafo Priority
+                priority_img_para = insert_paragraph_after(doc.paragraphs[j])
+                run = priority_img_para.add_run()
+                run.add_picture(usa_priority_buf, width=Inches(6))
+                
+                # Añadir leyenda para el gráfico
+                priority_caption = insert_paragraph_after(priority_img_para, "Figure: USA Scaled Tickets Priority Distribution")
+                break
+        break
+
 # ----------------------------------------
 # 5. --- Sección Global Scaled Tickets ---
 # ----------------------------------------
@@ -351,12 +581,12 @@ for i, para in enumerate(doc.paragraphs):
             doc.paragraphs[i+1].text = f'Total Tickets: {global_total}'
         break
 
-# Insertar “Status” + tabla Global Status debajo de “Total Tickets:”
+# Insertar "Status" + tabla Global Status debajo de "Total Tickets:"
 global_status_para = None
 for i, para in enumerate(doc.paragraphs):
     if 'Global Scaled Tickets' in para.text:
         if i + 2 < len(doc.paragraphs) and doc.paragraphs[i+1].text.strip().startswith('Status'):
-            # si ya existe “Status” en la plantilla, usamos i+1; sino, creamos uno
+            # si ya existe "Status" en la plantilla, usamos i+1; sino, creamos uno
             global_status_para = doc.paragraphs[i+1]
         else:
             global_status_para = insert_paragraph_after(para, 'Status')
@@ -371,6 +601,8 @@ if global_status_para is not None:
         r = table_global_status.add_row().cells
         r[0].text = str(row['Status'])
         r[1].text = str(int(row['Count']))
+    # Apply the new style to the table
+    style_table_like_image(table_global_status)
 
 # Insertar tabla Global Priority debajo de “Priority”
 global_priority_para = None
@@ -391,8 +623,10 @@ if global_priority_para is not None:
         r = tbl_glob_prio.add_row().cells
         r[0].text = str(row['Priority'])
         r[1].text = str(int(row['Count']))
+    # Apply the new style to the table
+    style_table_like_image(tbl_glob_prio)
 
-# Insertar “Global Tickets with Highest Priority” mini-tabla
+# Insertar "Global Tickets with Highest Priority" mini-tabla
 glob_top_para = None
 for para in doc.paragraphs:
     if para.text.strip().startswith('Global Tickets with Highest Priority'):
@@ -400,16 +634,41 @@ for para in doc.paragraphs:
         break
 
 if glob_top_para is not None:
-    tbl_glob_top = insert_table_after(doc, glob_top_para, 1, 3)
+    # Create table with 7 columns to match the image format
+    tbl_glob_top = insert_table_after(doc, glob_top_para, 1, 7)
+    
+    # Set column headers matching the image
     hdr = tbl_glob_top.rows[0].cells
     hdr[0].text = 'Issue key'
-    hdr[1].text = 'Summary'
-    hdr[2].text = 'Days Open'
-    for _, row in df_global_top.head(10).iterrows():
+    hdr[1].text = 'Issue id'
+    hdr[2].text = 'Summary' 
+    hdr[3].text = 'Priority'
+    hdr[4].text = 'Status'
+    hdr[5].text = 'Created'
+    hdr[6].text = 'Sprint'
+    
+    # Apply the blue header styling
+    style_table_like_image(tbl_glob_top)
+    
+    # Add data rows - sort by creation date (newest first)
+    sorted_global_top = df_global_top.sort_values(by='Created', ascending=False)
+    
+    for _, row in sorted_global_top.head(10).iterrows():
         r = tbl_glob_top.add_row().cells
         r[0].text = str(row['Issue key'])
-        r[1].text = str(row.get('Summary', ''))
-        r[2].text = str(int(row['DaysOpen']))
+        r[1].text = str(row.get('Issue id', ''))
+        r[2].text = str(row.get('Summary', ''))
+        r[3].text = str(row.get('Priority', ''))
+        r[4].text = str(row.get('Status', ''))
+        
+        # Format the Created date to match the image format (MM/DD/YYYY)
+        created_date = row.get('Created')
+        if created_date is not None and hasattr(created_date, 'strftime'):
+            r[5].text = created_date.strftime('%m/%d/%Y %H:%M')
+        else:
+            r[5].text = str(created_date)
+            
+        r[6].text = str(row.get('Sprint', ''))
 
 # ----------------------------------------
 # 6. --- Guardar documento final con fecha en el nombre ---

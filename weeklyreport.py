@@ -9,6 +9,9 @@ from docx.oxml.ns import qn, nsdecls
 import matplotlib.pyplot as plt
 import io
 
+# Default statuses filter
+focus_statuses = ["To Do", "In Progress", "QA"]
+
 # ----------------------------------------
 # Funciones auxiliares para inserciones en Word
 # ----------------------------------------
@@ -137,14 +140,18 @@ status_counts = (
 )
 status_counts.columns = ['Status', 'Count']
 
-# Define the statuses we want to focus on consistently throughout the report
-focus_statuses = ["To Do", "In Progress", "QA"]
+# Calculate percentage of each status over the total tickets
+total_tickets = len(df)
+status_counts['Count'] = pd.to_numeric(status_counts['Count'], errors='coerce').fillna(0).astype(int)
+status_counts['Percentage'] = (status_counts['Count'] / total_tickets * 100).round(2)
 
-# Filter to include only focus statuses instead of excluding "To Do"
-status_counts = status_counts[status_counts['Status'].isin(focus_statuses)]
-status_counts['Percentage'] = (status_counts['Count'] / status_counts['Count'].sum() * 100).round(2)
+# Debug: print status_counts to console
+print("status_counts DataFrame:")
+print(status_counts.to_string(index=False))
 
 # 1.3.2 Tickets con más de 10 días abiertos
+# Define statuses to filter old tickets
+focus_statuses = ["To Do", "In Progress", "QA"]
 df['createdAt'] = pd.to_datetime(df['createdAt'])
 df['createdAt'] = df['createdAt'].dt.tz_localize(None)
 now = datetime.now()
@@ -806,4 +813,3 @@ except Exception as e:
         print(f'Reporte recuperado generado: {temp_filename}')
     except Exception as e2:
         print(f'Error al intentar recuperar documento: {e2}')
-

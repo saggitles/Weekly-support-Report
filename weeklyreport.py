@@ -8,6 +8,7 @@ from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn, nsdecls
 import matplotlib.pyplot as plt
 import io
+from docx.text.paragraph import Paragraph
 
 # Default statuses filter
 focus_statuses = ["To Do", "In Progress", "QA"]
@@ -157,8 +158,8 @@ df['createdAt'] = df['createdAt'].dt.tz_localize(None)
 now = datetime.now()
 df['DaysOpen'] = (now - df['createdAt']).dt.days
 
-# Filter for tickets with more than 10 days open AND within our focus statuses
-df_old = df[(df['DaysOpen'] > 10) & (df['Status_norm'].isin(focus_statuses))].copy()
+# Filter for tickets with more than 10 days open AND status 'In Progress'
+df_old = df[(df['DaysOpen'] > 10) & (df['Status_norm'] == 'In Progress')].copy()
 df_old = df_old.sort_values(by='DaysOpen', ascending=False)
 
 # 1.3.3 Preparar gráfico "Distribución by Category"
@@ -376,6 +377,8 @@ doc.core_properties.author = "L10 Team"
 # Create title
 title = doc.add_heading('Support & Tickets Report', level=1)
 title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in title.runs:
+    run.font.size = Pt(24)
 
 # ----------------------------------------
 # NEW SECTION: Recent Support Tickets (Past Two Weeks)
@@ -402,7 +405,10 @@ else:
     recent_calls_count = 0
 
 # Add section header
-doc.add_heading('Recent Support Activity (Past Two Weeks)', level=2)
+section = doc.add_heading('Recent Support Activity (Past Two Weeks)', level=2)
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(18)
 
 # Create a table for total counts
 total_counts_table = doc.add_table(rows=3, cols=2)
@@ -508,6 +514,9 @@ if recent_tickets_count > 0:
     
 # Add total tickets
 doc.add_heading('Total support tickets', level=3)
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(16)
 doc.add_paragraph(f'Total Tickets: {total_tickets}')
 
 # Create the STATUS table
@@ -564,13 +573,22 @@ for row in status_table.rows:
         )
 
 # Add Category Distribution section
-doc.add_heading('Distribution by Category:', level=2)
+section = doc.add_heading('Distribution by Category:', level=1)
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(18)
 category_para = doc.add_paragraph()
 category_run = category_para.add_run()
 category_run.add_picture(buf, width=Inches(6))
 
-# Add Tickets with more de 10 días abiertos
-doc.add_heading('Tickets with más de 10 días abiertos', level=2)
+# Add Tickets with más de 10 días abiertos
+doc.add_paragraph()
+doc.add_paragraph()
+section = doc.add_heading('Tickets with more than 10 days open', level=2)
+
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(18)
 old_tickets_table = doc.add_table(rows=1, cols=5)
 old_tickets_table.style = 'Table Grid'
 
@@ -602,7 +620,13 @@ for ticket_id in df_old['IDTicket']:
 # ----------------------------------------
 # 4. --- USA Scaled Tickets Section ---
 # ----------------------------------------
-doc.add_heading('USA Scaled Tickets', level=2)
+doc.add_paragraph()
+doc.add_paragraph()
+section = doc.add_heading('USA Scaled Tickets', level=2)
+
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(18)
 doc.add_paragraph(f'Total tickets: {usa_total}')
 
 # Add STATUS graph
@@ -622,7 +646,10 @@ priority_run.add_picture(usa_priority_buf, width=Inches(6))
 doc.add_paragraph(f'Highest average days opened = {highest_avg_usa} days')
 
 # Add USA Top Priority Tickets
-doc.add_heading('USA Tickets with Top Priority', level=3)
+section = doc.add_heading('USA Tickets with Top Priority', level=2)
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(16)
 usa_tickets_table = doc.add_table(rows=1, cols=7)
 hdr = usa_tickets_table.rows[0].cells
 hdr[0].text = 'Issue key'
@@ -680,7 +707,13 @@ if added_rows < 5:
 # ----------------------------------------
 # 5. --- Global Scaled Tickets Section ---
 # ----------------------------------------
-doc.add_heading('Global Scaled Tickets', level=2)
+doc.add_paragraph()
+doc.add_paragraph()
+section = doc.add_heading('Global Scaled Tickets', level=3)
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(18)
 doc.add_paragraph(f'Total Tickets: {global_total}')
 
 # Add Status section
@@ -700,6 +733,8 @@ for _, row in global_status_counts.iterrows():
     r[1].text = str(int(row['Count']))
 
 # Add Priority section
+doc.add_paragraph()
+doc.add_paragraph()
 doc.add_paragraph('Priority')
 global_priority_table = doc.add_table(rows=1, cols=2)
 hdr = global_priority_table.rows[0].cells
@@ -716,7 +751,11 @@ for _, row in global_priority_counts.iterrows():
     r[1].text = str(int(row['Count']))
 
 # Add Global Top Priority Tickets
-doc.add_heading('Global Tickets with Highest Priority', level=3)
+doc.add_paragraph()
+section = doc.add_heading('Global Tickets with Highest Priority', level=3)
+section.alignment = WD_ALIGN_PARAGRAPH.CENTER
+for run in section.runs:
+    run.font.size = Pt(16)
 global_tickets_table = doc.add_table(rows=1, cols=7)
 hdr = global_tickets_table.rows[0].cells
 hdr[0].text = 'Issue key'

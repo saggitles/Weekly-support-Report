@@ -197,7 +197,7 @@ if not os.path.isfile(jira_path):
     raise FileNotFoundError(f"No se encontró el archivo de Jira: {jira_path}")
 
 df_jira = pd.read_csv(jira_path, low_memory=False)
-df_jira['Created'] = pd.to_datetime(df_jira['Created'], dayfirst=False, utc=True)
+df_jira['Created'] = pd.to_datetime(df_jira['Created'], dayfirst=True, utc=True)
 df_jira['Created'] = df_jira['Created'].dt.tz_localize(None)
 df_jira['DaysOpen'] = (now - df_jira['Created']).dt.days
 
@@ -799,7 +799,7 @@ fecha = now.strftime('%Y-%m-%d')
 hora = now.strftime('%H-%M-%S')
 output_dir = r'D:\l10 report\reports'
 os.makedirs(output_dir, exist_ok=True)
-output_filename = os.path.join(output_dir, f'test_de_reporte_l10_full_{fecha}_time_{hora}.docx')
+output_filename = os.path.join(output_dir, f'weekly_support_report_{fecha}_time_{hora}.docx')
 
 # Save with additional error handling
 try:
